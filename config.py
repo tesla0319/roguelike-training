@@ -40,6 +40,7 @@ AREA_PRESETS = {
         "SURVIVE_TURNS":        30,
         "MAX_ACTIVE_ENEMIES":   2,
         "ENEMY_SPAWN_INTERVAL": 5,
+        "INITIAL_ITEM_COUNT":   3,     # MIN 3 でインベントリ満タン検証が成立
     },
     "medium": {
         "MAP_W":                10,
@@ -49,6 +50,7 @@ AREA_PRESETS = {
         "SURVIVE_TURNS":        100,
         "MAX_ACTIVE_ENEMIES":   3,
         "ENEMY_SPAWN_INTERVAL": 5,
+        "INITIAL_ITEM_COUNT":   5,
     },
     "large": {
         "MAP_W":                15,
@@ -58,6 +60,7 @@ AREA_PRESETS = {
         "SURVIVE_TURNS":        200,
         "MAX_ACTIVE_ENEMIES":   5,
         "ENEMY_SPAWN_INTERVAL": 5,
+        "INITIAL_ITEM_COUNT":   8,
     },
 }
 

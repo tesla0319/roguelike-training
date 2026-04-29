@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| バージョン | **v1.8**（エリアサイズプリセット追加版） |
+| バージョン | **v1.9**（エリア別アイテム数設定追加版） |
 | ステータス | **仕様確定**（プレイテスト調整パラメータを除く） |
 | 最終更新 | 2026-04-29 |
 
@@ -22,6 +22,7 @@
 > - v1.6（2026-04-29）：壁マス数のバリデーションルールを通常生成とフォールバック生成で分離（MAP-00 として明示）。仕様矛盾を解消。
 > - v1.7（2026-04-29）：敵の定期スポーン機能を追加（§16）。§7.1 にステップ [6b] を追加。戦闘検証のしやすさを向上。
 > - v1.8（2026-04-29）：エリアサイズプリセット機能を追加（§4.6）。small / medium / large の3種類から選択可能。MAP_W / MAP_H / WALL_MIN / WALL_MAX / SURVIVE_TURNS / MAX_ACTIVE_ENEMIES / ENEMY_SPAWN_INTERVAL をエリアごとに一括設定。
+> - v1.9（2026-04-29）：INITIAL_ITEM_COUNT をエリアサイズプリセット（§4.6）に追加。small=3 / medium=5 / large=8。どのサイズでもインベントリ満タン（§11.3）の検証が成立する最小数を保証。
 
 ---
 
@@ -173,8 +174,11 @@ MAP_GEN_MAX_RETRY 回連続でMAP-01〜05のいずれかに違反し続けた場
 | SURVIVE_TURNS | 30 | 100 | 200 |
 | MAX_ACTIVE_ENEMIES | 2 | 3 | 5 |
 | ENEMY_SPAWN_INTERVAL | 5 | 5 | 5 |
+| INITIAL_ITEM_COUNT | 3 | 5 | 8 |
 
 > ※ `CURRENT_PRESET`（easy / normal / hard）を同時に指定すると SURVIVE_TURNS をさらに上書きできる。その他のパラメータ（PLAYER_MAX_HP, ENEMY_ATK 等）はエリアサイズに依存せず `_DEFAULTS` の値が使われる。
+>
+> ※ `INITIAL_ITEM_COUNT` はすべてのエリアで `MAX_INVENTORY（=2）+ 1` 以上を確保している。これにより「インベントリ満タンで拾えない」シナリオ（§11.3 上限到達時の挙動）を必ず検証できる。
 
 ---
 
@@ -527,6 +531,10 @@ MAP_GEN_MAX_RETRY 回連続でMAP-01〜05のいずれかに違反し続けた場
 | B-33 | エリア別 SURVIVE_TURNS | small/medium/large それぞれで起動したときのターン上限値 | small=30, medium=100, large=200 |
 | B-34 | PRESET による SURVIVE_TURNS 上書き | CURRENT_AREA="small", CURRENT_PRESET="hard" | SURVIVE_TURNS=200（エリアの 30 を難易度設定が上書き） |
 | B-35 | PRESET="normal" はエリア値を維持 | CURRENT_AREA="large", CURRENT_PRESET="normal" | SURVIVE_TURNS=200（エリアの 200 がそのまま使われる） |
+| B-36 | small のアイテム配置数 | CURRENT_AREA="small" で起動 | マップ上の回復薬が 3 個（フロア不足時は切り詰め） |
+| B-37 | large のアイテム配置数 | CURRENT_AREA="large" で起動 | マップ上の回復薬が 8 個 |
+| B-38 | インベントリ満タン境界（small） | small エリアで 2 個取得後、3 個目に踏む | 「インベントリ満タン！」メッセージが表示され取得されない |
+| B-39 | インベントリ満タン境界（large） | large エリアで 2 個取得後、3 個目以降に踏む | 同上。large でも満タン検証が成立する |
 
 ### 10.4 状態遷移
 | ID | 観点 | 遷移パス |
@@ -556,10 +564,11 @@ MAP_GEN_MAX_RETRY 回連続でMAP-01〜05のいずれかに違反し続けた場
 ### 11.2 マップ上の配置
 | 項目 | 仕様 |
 |---|---|
-| 初期配置数 | `INITIAL_ITEM_COUNT = 2`（暫定、実装後調整） |
+| 初期配置数 | `INITIAL_ITEM_COUNT`（エリアサイズに依存。§4.6 参照：small=3 / medium=5 / large=8） |
 | 配置方式 | ランダム（壁マス・プレイヤー初期マス・敵初期マスを除く） |
 | 配置タイミング | ゲーム開始時（マップ生成と同時） |
 | ゲーム途中での再配置 | なし |
+| フォールバック | 余剰フロアマス数 < `INITIAL_ITEM_COUNT` の場合は配置可能数に切り詰め（エラーにならない） |
 
 ### 11.3 取得（拾う）
 | 項目 | 仕様 |
