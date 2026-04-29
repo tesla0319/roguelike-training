@@ -42,6 +42,7 @@ from config import (
     HEAL_AMOUNT, INITIAL_ITEM_COUNT, MAX_INVENTORY,
     KILL_BONUS,
     ENEMY_SPAWN_INTERVAL, MAX_ACTIVE_ENEMIES,
+    BOSS_HP_MULTIPLIER, BOSS_ATK_MULTIPLIER, BOSS_KILL_BONUS, BOSS_SPAWN_OFFSET,
 )
 
 # ============================================================
@@ -73,6 +74,7 @@ WALL_CHAR  = '#'
 SYM_PLAYER = 'P'
 SYM_ENEMY  = 'E'
 SYM_ITEM   = '!'  # 回復薬（仕様 §15.3）
+SYM_BOSS   = 'B'  # ボス敵
 
 # ゲーム状態（仕様 §9.1）
 PLAYING  = 'playing'
@@ -224,8 +226,42 @@ def try_spawn_enemy(grid, player, enemies, items):
         return None
 
     sx, sy = random.choice(candidates)
-    enemies.append({'x': sx, 'y': sy, 'hp': ENEMY_MAX_HP})
+    enemies.append({
+        'x': sx, 'y': sy,
+        'hp': ENEMY_MAX_HP, 'max_hp': ENEMY_MAX_HP,
+        'atk': ENEMY_ATK, 'is_boss': False,
+    })
     return '敵が出現した！'
+
+
+# ============================================================
+# ボス出現（SURVIVE_TURNS - BOSS_SPAWN_OFFSET ターンで1度だけ）
+# ============================================================
+def try_spawn_boss(grid, player, enemies, items):
+    """
+    ボスを1体スポーンする。MAX_ACTIVE_ENEMIES の制限は受けない。
+    スポーン位置は通常敵と同じルール（壁・プレイヤー・既存敵・アイテムを除外）。
+    返値: スポーン成功時はメッセージ文字列、失敗時（候補なし）は None
+    """
+    occupied = {(player['x'], player['y'])}
+    occupied |= {(e['x'], e['y']) for e in enemies if e['hp'] > 0}
+    occupied |= {(item['x'], item['y']) for item in items}
+
+    reachable  = _bfs_reachable(grid, player['x'], player['y'])
+    candidates = [(x, y) for (x, y) in reachable if (x, y) not in occupied]
+
+    if not candidates:
+        return None
+
+    bx, by   = random.choice(candidates)
+    boss_hp  = ENEMY_MAX_HP * BOSS_HP_MULTIPLIER
+    boss_atk = ENEMY_ATK * BOSS_ATK_MULTIPLIER
+    enemies.append({
+        'x': bx, 'y': by,
+        'hp': boss_hp, 'max_hp': boss_hp,
+        'atk': boss_atk, 'is_boss': True,
+    })
+    return f'【ボス出現！】残り{BOSS_SPAWN_OFFSET}ターン ― 強敵が現れた！'
 
 
 # ============================================================
@@ -238,9 +274,9 @@ def render(grid, player, enemies, items, state, turn, message=''):
 
     hp    = player['hp']
     inv   = player['inventory']
-    kills = player['kills']
-    # 仕様 §12.1: スコア = 敵撃破数 × KILL_BONUS + 経過ターン数
-    score = kills * KILL_BONUS + turn
+    kills = player['kills'] + player['boss_kills']
+    # スコア = 通常撃破 × KILL_BONUS + ボス撃破 × BOSS_KILL_BONUS + 経過ターン数
+    score = player['kills'] * KILL_BONUS + player['boss_kills'] * BOSS_KILL_BONUS + turn
     alive = [e for e in enemies if e['hp'] > 0]
 
     # ヘッダー（仕様 §15.2.1）
@@ -252,11 +288,14 @@ def render(grid, player, enemies, items, state, turn, message=''):
     print(f"Turn: {turn:2d} / {SURVIVE_TURNS}    Score: {score:3d}    Kills: {kills}")
     print(f"HP:   {hp:3d} / {PLAYER_MAX_HP}    Inv: {inv} / {MAX_INVENTORY}")
     if alive:
-        e = alive[0]
-        print(f"Enemy HP: {e['hp']:2d} / {ENEMY_MAX_HP}    "
-              f"P:({player['x']},{player['y']})  E:({e['x']},{e['y']})")
+        # ボスが生存していれば優先表示
+        e     = next((e for e in alive if e.get('is_boss')), alive[0])
+        label = 'Boss ' if e.get('is_boss') else 'Enemy'
+        sym   = SYM_BOSS if e.get('is_boss') else SYM_ENEMY
+        print(f"{label} HP: {e['hp']:2d} / {e['max_hp']}    "
+              f"P:({player['x']},{player['y']})  {sym}:({e['x']},{e['y']})")
     else:
-        print("Enemy: DEFEATED  （全敵撃破 ― 30ターンまで継続）")
+        print("Enemy: DEFEATED  （全撃破 ― 規定ターンまで継続）")
     print()
 
     # マップ描画（仕様 §15.3 / §15.3.1 表示優先度: P > E > ! > .）
@@ -265,7 +304,7 @@ def render(grid, player, enemies, items, state, turn, message=''):
         display[item['y']][item['x']] = SYM_ITEM   # 回復薬
     for e in enemies:
         if e['hp'] > 0:
-            display[e['y']][e['x']] = SYM_ENEMY    # 敵（!より優先）
+            display[e['y']][e['x']] = SYM_BOSS if e.get('is_boss') else SYM_ENEMY
     display[player['y']][player['x']] = SYM_PLAYER  # プレイヤーが最高優先
 
     for row in display:
@@ -410,19 +449,23 @@ def check_outcome(player, turn):
 # ============================================================
 def init_game():
     grid, (px, py), enemy_starts = generate_map()
-    player  = {'x': px, 'y': py, 'hp': PLAYER_MAX_HP, 'inventory': 0, 'kills': 0}  # §5.1
-    enemies = [{'x': ex, 'y': ey, 'hp': ENEMY_MAX_HP} for ex, ey in enemy_starts]
-    items   = place_items(grid, px, py, enemy_starts)  # §11.2: 回復薬初期配置
-    return grid, player, enemies, items, 0  # (grid, player, enemies, items, turn)
+    player  = {'x': px, 'y': py, 'hp': PLAYER_MAX_HP, 'inventory': 0, 'kills': 0, 'boss_kills': 0}
+    enemies = [
+        {'x': ex, 'y': ey, 'hp': ENEMY_MAX_HP, 'max_hp': ENEMY_MAX_HP, 'atk': ENEMY_ATK, 'is_boss': False}
+        for ex, ey in enemy_starts
+    ]
+    items        = place_items(grid, px, py, enemy_starts)
+    boss_spawned = False
+    return grid, player, enemies, items, 0, boss_spawned
 
 
 # ============================================================
 # メインループ（仕様 §7.1 ターン進行 [1]〜[7]）
 # ============================================================
 def main():
-    grid, player, enemies, items, turn = init_game()
+    grid, player, enemies, items, turn, boss_spawned = init_game()
     state   = PLAYING
-    message = '30ターン生き残れ！'
+    message = f'{SURVIVE_TURNS}ターン生き残れ！'
 
     while True:
         render(grid, player, enemies, items, state, turn, message)
@@ -433,7 +476,7 @@ def main():
             key = getch()
             if key == 'r':
                 # リスタート: 全項目リセット（仕様 §9.1.1）
-                grid, player, enemies, items, turn = init_game()
+                grid, player, enemies, items, turn, boss_spawned = init_game()
                 state   = PLAYING
                 message = 'リスタート！'
             elif key == 'q':
@@ -473,14 +516,19 @@ def main():
                 # 移動先に敵 → 戦闘（仕様 §8.3: 移動してきた側 = プレイヤーが先攻）
                 p_dmg, killed, p_res = do_combat(PLAYER_ATK, target)
                 if killed:
-                    # 仕様 §8.4: 敵HP≤0 → 撃破。プレイヤーは倒したマスへ進む
                     player['x'], player['y'] = nx, ny
                     moved = True
-                    player['kills'] += 1  # 仕様 §12.2: 撃破時にスコア更新
-                    message = f'敵を撃破！（与: {_fmt(p_res, p_dmg)}）  Score: {player["kills"] * KILL_BONUS + turn}'
+                    if target.get('is_boss'):
+                        player['boss_kills'] += 1
+                        label = 'ボスを撃破'
+                    else:
+                        player['kills'] += 1
+                        label = '敵を撃破'
+                    score_now = player['kills'] * KILL_BONUS + player['boss_kills'] * BOSS_KILL_BONUS + turn
+                    message = f'{label}！（与: {_fmt(p_res, p_dmg)}）  Score: {score_now}'
                 else:
-                    # 仕様 §8.3: 敵が生存 → 反撃（プレイヤーは移動しない）
-                    e_dmg, _, e_res = do_combat(ENEMY_ATK, player)
+                    # 敵が生存 → 反撃（プレイヤーは移動しない）
+                    e_dmg, _, e_res = do_combat(target['atk'], player)
                     message = (f'戦闘！ 与:{_fmt(p_res, p_dmg)} / 被:{_fmt(e_res, e_dmg)}'
                                f'  →  自HP: {player["hp"]}  敵HP: {target["hp"]}')
             else:
@@ -540,16 +588,21 @@ def main():
             result = move_enemy(enemy, grid, player, enemies)
             if result == 'combat':
                 # 敵がプレイヤーへ突撃 → 敵が先攻（仕様 §8.3）
-                e_dmg, player_killed, e_res = do_combat(ENEMY_ATK, player)
+                e_dmg, player_killed, e_res = do_combat(enemy['atk'], player)
                 if player_killed:
-                    message = f'敵の攻撃！ {_fmt(e_res, e_dmg)}ダメージ → 敗北...'
+                    attacker = 'ボスの攻撃！' if enemy.get('is_boss') else '敵の攻撃！'
+                    message = f'{attacker} {_fmt(e_res, e_dmg)}ダメージ → 敗北...'
                     break  # 敗北確定: 残りの敵行動はスキップ
-                # 仕様 §8.3: プレイヤー生存 → 反撃
+                # プレイヤー生存 → 反撃（仕様 §8.3）
                 p_dmg, enemy_killed, p_res = do_combat(PLAYER_ATK, enemy)
-                msg = f'敵が突撃！ 被:{_fmt(e_res, e_dmg)} / 反撃:{_fmt(p_res, p_dmg)}'
+                msg = f'{"ボス" if enemy.get("is_boss") else "敵"}が突撃！ 被:{_fmt(e_res, e_dmg)} / 反撃:{_fmt(p_res, p_dmg)}'
                 if enemy_killed:
-                    player['kills'] += 1  # 仕様 §12.2: 撃破時にスコア更新
-                    msg += f'  → 敵撃破！  Score: {player["kills"] * KILL_BONUS + turn}'
+                    if enemy.get('is_boss'):
+                        player['boss_kills'] += 1
+                        msg += f'  → ボス撃破！  Score: {player["kills"] * KILL_BONUS + player["boss_kills"] * BOSS_KILL_BONUS + turn}'
+                    else:
+                        player['kills'] += 1
+                        msg += f'  → 敵撃破！  Score: {player["kills"] * KILL_BONUS + player["boss_kills"] * BOSS_KILL_BONUS + turn}'
                 message = (message + '  ' + msg).strip() if message else msg
 
         # ===== [5] 勝敗判定（仕様 §7.1 [5]）=====
@@ -566,6 +619,13 @@ def main():
             spawn_msg = try_spawn_enemy(grid, player, enemies, items)
             if spawn_msg:
                 message = (message + '  ' + spawn_msg).strip() if message else spawn_msg
+
+        # ===== [6c] ボス出現（SURVIVE_TURNS - BOSS_SPAWN_OFFSET ターンで1度だけ）=====
+        if turn == SURVIVE_TURNS - BOSS_SPAWN_OFFSET and not boss_spawned:
+            boss_spawned = True
+            boss_msg = try_spawn_boss(grid, player, enemies, items)
+            if boss_msg:
+                message = (message + '  ' + boss_msg).strip() if message else boss_msg
 
         # ===== [7] 勝敗判定（仕様 §7.1 [7]: 生存型クリアの主要判定タイミング）=====
         outcome = check_outcome(player, turn)
