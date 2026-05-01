@@ -82,7 +82,11 @@ PRESETS = {
 CURRENT_PRESET = "normal"
 
 # --- 優先順位: _DEFAULTS < AREA_PRESETS < PRESETS ---
-_cfg = {**_DEFAULTS, **AREA_PRESETS.get(CURRENT_AREA, {}), **PRESETS.get(CURRENT_PRESET, {})}
+_cfg = {
+    **_DEFAULTS,
+    **AREA_PRESETS.get(CURRENT_AREA, {}),
+    **PRESETS.get(CURRENT_PRESET, {}),
+}
 
 MAP_W                = _cfg["MAP_W"]
 MAP_H                = _cfg["MAP_H"]

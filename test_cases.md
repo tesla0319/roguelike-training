@@ -182,8 +182,6 @@
 
 ---
 
----
-
 ## 10. ダメージ振れ幅
 
 > **前提**: `INTENTIONAL_BUGS = set()`（全バグOFF）。`CURRENT_AREA = "small"` 推奨（戦闘頻度が高く確認しやすい）。
