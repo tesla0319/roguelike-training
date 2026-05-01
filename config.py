@@ -33,6 +33,8 @@ _DEFAULTS = {
     "BOSS_SPAWN_OFFSET":    10,   # SURVIVE_TURNS - この値 のターンでボス出現
     "ENEMY_CHASE_RATE":     0.7,  # 敵がプレイヤー方向へ近づく確率（0.0=完全ランダム, 1.0=常に追尾）
     "DAMAGE_VARIANCE_RATE": 0.2,  # 通常ダメージの振れ幅（ATK ± この割合: 0.0=固定, 0.2=±20%）
+    "DAMAGE_FLOOR_DAMAGE":  5,    # ダメージ床を踏んだときのダメージ量
+    "DAMAGE_FLOOR_COUNT":   3,    # ダメージ床の初期配置数（エリア別に上書き）
 }
 
 # --- エリアサイズプリセット ---
@@ -47,6 +49,7 @@ AREA_PRESETS = {
         "MAX_ACTIVE_ENEMIES":   2,
         "ENEMY_SPAWN_INTERVAL": 5,
         "INITIAL_ITEM_COUNT":   3,     # MIN 3 でインベントリ満タン検証が成立
+        "DAMAGE_FLOOR_COUNT":   2,
     },
     "medium": {
         "MAP_W":                10,
@@ -57,6 +60,7 @@ AREA_PRESETS = {
         "MAX_ACTIVE_ENEMIES":   3,
         "ENEMY_SPAWN_INTERVAL": 5,
         "INITIAL_ITEM_COUNT":   5,
+        "DAMAGE_FLOOR_COUNT":   5,
     },
     "large": {
         "MAP_W":                15,
@@ -67,6 +71,7 @@ AREA_PRESETS = {
         "MAX_ACTIVE_ENEMIES":   5,
         "ENEMY_SPAWN_INTERVAL": 5,
         "INITIAL_ITEM_COUNT":   8,
+        "DAMAGE_FLOOR_COUNT":   10,
     },
 }
 
@@ -111,3 +116,5 @@ BOSS_KILL_BONUS      = _cfg["BOSS_KILL_BONUS"]
 BOSS_SPAWN_OFFSET    = _cfg["BOSS_SPAWN_OFFSET"]
 ENEMY_CHASE_RATE     = _cfg["ENEMY_CHASE_RATE"]
 DAMAGE_VARIANCE_RATE = _cfg["DAMAGE_VARIANCE_RATE"]
+DAMAGE_FLOOR_DAMAGE  = _cfg["DAMAGE_FLOOR_DAMAGE"]
+DAMAGE_FLOOR_COUNT   = _cfg["DAMAGE_FLOOR_COUNT"]

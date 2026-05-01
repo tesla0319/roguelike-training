@@ -45,6 +45,8 @@ from config import (
     BOSS_HP_MULTIPLIER, BOSS_ATK_MULTIPLIER, BOSS_KILL_BONUS, BOSS_SPAWN_OFFSET,
     ENEMY_CHASE_RATE,
     DAMAGE_VARIANCE_RATE,
+    DAMAGE_FLOOR_DAMAGE,
+    DAMAGE_FLOOR_COUNT,
 )
 
 # ============================================================
@@ -75,8 +77,9 @@ FLOOR      = '.'
 WALL_CHAR  = '#'
 SYM_PLAYER = 'P'
 SYM_ENEMY  = 'E'
-SYM_ITEM   = '!'  # 回復薬（仕様 §15.3）
-SYM_BOSS   = 'B'  # ボス敵
+SYM_ITEM         = '!'  # 回復薬（仕様 §15.3）
+SYM_BOSS         = 'B'  # ボス敵
+SYM_DAMAGE_FLOOR = '^'  # ダメージ床（仕様 §18）
 
 # ゲーム状態（仕様 §9.1）
 PLAYING  = 'playing'
@@ -203,6 +206,22 @@ def place_items(grid, px, py, enemy_starts):
     return [{'x': x, 'y': y} for x, y in random.sample(free, n)]
 
 
+def place_damage_floors(grid, px, py, enemy_starts, items):
+    """
+    マップ上にダメージ床を DAMAGE_FLOOR_COUNT 個ランダム配置する。
+    仕様 §18.2: 壁・プレイヤー初期マス・敵初期マス・回復薬マスを除くフロアマスに配置。
+    """
+    occupied = {(px, py)} | set(enemy_starts)
+    occupied |= {(item['x'], item['y']) for item in items}
+    free = [
+        (x, y)
+        for y in range(MAP_H) for x in range(MAP_W)
+        if grid[y][x] == FLOOR and (x, y) not in occupied
+    ]
+    n = min(DAMAGE_FLOOR_COUNT, len(free))
+    return [{'x': x, 'y': y} for x, y in random.sample(free, n)]
+
+
 # ============================================================
 # 敵スポーン（仕様 §16）
 # ============================================================
@@ -269,7 +288,7 @@ def try_spawn_boss(grid, player, enemies, items):
 # ============================================================
 # 描画（仕様 §15.2, §15.2.1, §15.2.2, §15.3）
 # ============================================================
-def render(grid, player, enemies, items, state, turn, message=''):
+def render(grid, player, enemies, items, damage_floors, state, turn, message=''):
     # ANSIエスケープで画面クリア（仕様 §15.2）
     sys.stdout.write('\033[2J\033[H')
     sys.stdout.flush()
@@ -300,8 +319,10 @@ def render(grid, player, enemies, items, state, turn, message=''):
         print("Enemy: DEFEATED  （全撃破 ― 規定ターンまで継続）")
     print()
 
-    # マップ描画（仕様 §15.3 / §15.3.1 表示優先度: P > E > ! > .）
+    # マップ描画（仕様 §15.3 / §15.3.1 表示優先度: P > E > ! > ^ > .）
     display = [row[:] for row in grid]
+    for df in damage_floors:
+        display[df['y']][df['x']] = SYM_DAMAGE_FLOOR  # ダメージ床
     for item in items:
         display[item['y']][item['x']] = SYM_ITEM   # 回復薬
     for e in enemies:
@@ -485,21 +506,22 @@ def init_game():
         {'x': ex, 'y': ey, 'hp': ENEMY_MAX_HP, 'max_hp': ENEMY_MAX_HP, 'atk': ENEMY_ATK, 'is_boss': False}
         for ex, ey in enemy_starts
     ]
-    items        = place_items(grid, px, py, enemy_starts)
-    boss_spawned = False
-    return grid, player, enemies, items, 0, boss_spawned
+    items         = place_items(grid, px, py, enemy_starts)
+    damage_floors = place_damage_floors(grid, px, py, enemy_starts, items)
+    boss_spawned  = False
+    return grid, player, enemies, items, damage_floors, 0, boss_spawned
 
 
 # ============================================================
 # メインループ（仕様 §7.1 ターン進行 [1]〜[7]）
 # ============================================================
 def main():
-    grid, player, enemies, items, turn, boss_spawned = init_game()
+    grid, player, enemies, items, damage_floors, turn, boss_spawned = init_game()
     state   = PLAYING
     message = f'{SURVIVE_TURNS}ターン生き残れ！'
 
     while True:
-        render(grid, player, enemies, items, state, turn, message)
+        render(grid, player, enemies, items, damage_floors, state, turn, message)
         message = ''
 
         # ===== ゲーム終了状態: R / Q のみ受付（仕様 §6.2）=====
@@ -507,7 +529,7 @@ def main():
             key = getch()
             if key == 'r':
                 # リスタート: 全項目リセット（仕様 §9.1.1）
-                grid, player, enemies, items, turn, boss_spawned = init_game()
+                grid, player, enemies, items, damage_floors, turn, boss_spawned = init_game()
                 state   = PLAYING
                 message = 'リスタート！'
             elif key == 'q':
@@ -583,6 +605,15 @@ def main():
                             # 仕様 §11.3: 満タン時はアイテム残存、自動取得しない
                             pick_msg = f'インベントリ満タン！ 回復薬を拾えない（H/X で空きを作ること）'
                         message = (message + '  ' + pick_msg).strip() if message else pick_msg
+                        break
+
+            # ===== [2c] ダメージ床判定（仕様 §18 / §7.1 [2c]）=====
+            if moved:
+                for df in damage_floors:
+                    if df['x'] == player['x'] and df['y'] == player['y']:
+                        player['hp'] = max(0, player['hp'] - DAMAGE_FLOOR_DAMAGE)
+                        floor_msg = f'ダメージ床！ {DAMAGE_FLOOR_DAMAGE}ダメージ → HP: {player["hp"]}'
+                        message = (message + '  ' + floor_msg).strip() if message else floor_msg
                         break
 
         elif key == 'h':
