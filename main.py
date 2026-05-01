@@ -43,6 +43,8 @@ from config import (
     KILL_BONUS,
     ENEMY_SPAWN_INTERVAL, MAX_ACTIVE_ENEMIES,
     BOSS_HP_MULTIPLIER, BOSS_ATK_MULTIPLIER, BOSS_KILL_BONUS, BOSS_SPAWN_OFFSET,
+    ENEMY_CHASE_RATE,
+    DAMAGE_VARIANCE_RATE,
 )
 
 # ============================================================
@@ -335,10 +337,11 @@ def do_combat(atk, defender):
 
     判定順序（仕様 §8.2.2）:
       [1] ミス判定（MISS_RATE=10%）
-            成立 → damage=0、クリティカル判定スキップ（仕様 E-08）
-      [2] クリティカル判定（CRITICAL_RATE=20%）
-            成立 → damage = atk × CRITICAL_MULTIPLIER
-      [3] 通常攻撃 → damage = atk
+            成立 → damage=0、以降スキップ（仕様 E-08）
+      [2] 基礎ダメージ決定（ATK ± DAMAGE_VARIANCE_RATE, 最小1）
+      [3] クリティカル判定（CRITICAL_RATE=20%）
+            成立 → damage = base × CRITICAL_MULTIPLIER
+      [4] 通常攻撃 → damage = base
 
     返値: (damage, is_killed, result)
       result: 'miss' / 'critical' / 'normal'
@@ -346,23 +349,28 @@ def do_combat(atk, defender):
     """
     # [1] ミス判定（仕様 §8.2.2 [1]）
     if random.random() < MISS_RATE:
-        # BUG-06: ミスでも固定ダメージが入る（ミス判定が機能しない）
+        # BUG-06: ミスでも基礎ダメージが入る（ミス判定が機能しない）
         # 影響: ミス表示なのにHPが減る。確率検証でミス≒0%相当の挙動になる
         if 'BUG-06' in INTENTIONAL_BUGS:
-            damage = atk
-            defender['hp'] = max(0, defender['hp'] - damage)
-            return damage, defender['hp'] <= 0, 'miss'
+            base = max(1, round(atk * random.uniform(
+                1 - DAMAGE_VARIANCE_RATE, 1 + DAMAGE_VARIANCE_RATE)))
+            defender['hp'] = max(0, defender['hp'] - base)
+            return base, defender['hp'] <= 0, 'miss'
         return 0, False, 'miss'
 
-    # [2] クリティカル判定（仕様 §8.2.2 [2]）
+    # [2] 基礎ダメージ決定（仕様 §8.2.2 [2]）
+    base = max(1, round(atk * random.uniform(
+        1 - DAMAGE_VARIANCE_RATE, 1 + DAMAGE_VARIANCE_RATE)))
+
+    # [3] クリティカル判定（仕様 §8.2.2 [3]）
     if random.random() < CRITICAL_RATE:
         # BUG-03: クリティカル倍率が1.5x（仕様は2.0x）
-        # 影響: クリティカル時ダメージが ATK×1.5 になる（ATK=20なら40→30）
+        # 影響: クリティカル時ダメージが base×1.5 になる（base≈20なら40→30）
         multiplier = 1.5 if 'BUG-03' in INTENTIONAL_BUGS else CRITICAL_MULTIPLIER
-        damage = int(atk * multiplier)
+        damage = int(base * multiplier)
         result = 'critical'
     else:
-        damage = atk
+        damage = base
         result = 'normal'
 
     defender['hp'] = max(0, defender['hp'] - damage)  # 仕様 §8.4.1: 0クランプ
@@ -379,14 +387,16 @@ def _fmt(result, damage):
 
 
 # ============================================================
-# 敵の移動（仕様 §7.2）
+# 敵の移動（仕様 §7.2 / §17）
 # ============================================================
 def move_enemy(enemy, grid, player, all_enemies):
     """
-    敵の移動処理。上下左右をランダムに試行し、有効なマスへ移動する。
-      - 壁 / マップ外 / 他の敵のマス: 再抽選（仕様 §7.2.2）
+    敵の移動処理。ENEMY_CHASE_RATE の確率でプレイヤーへの追尾を試みる（仕様 §17）。
+      - 追尾モード: マンハッタン距離が縮まる方向のうち有効なマスへランダムに移動
+      - 追尾候補なし / 非追尾モード: 上下左右をランダムに試行するフォールバック
+      - 壁 / マップ外 / 他の敵のマス: 無効（仕様 §7.2.2）
       - プレイヤーのマス: 有効として確定し戦闘発生（仕様 §7.2.3）
-      - 4方向すべて無効: 静止（仕様 §7.2.2-4, ENEMY_MAX_RETRY=4）
+      - 有効マスがない場合: 静止（仕様 §7.2.2-4）
     返値: 'combat' / 'moved' / None
     """
     if enemy['hp'] <= 0:
@@ -395,25 +405,46 @@ def move_enemy(enemy, grid, player, all_enemies):
     # 他の敵の座標（敵同士の重なり不許可: 仕様 §7.2.4）
     other_pos = {(e['x'], e['y']) for e in all_enemies if e is not enemy and e['hp'] > 0}
     px, py = player['x'], player['y']
+    ex, ey = enemy['x'], enemy['y']
+    cur_dist = abs(ex - px) + abs(ey - py)
 
     dirs = [(0,-1), (0,1), (-1,0), (1,0)]
-    random.shuffle(dirs)  # ランダムな順序で試行
 
+    def can_enter(nx, ny):
+        """壁・範囲外・他の敵がいないか（プレイヤーマスは別途判定）"""
+        return (0 <= nx < MAP_W and 0 <= ny < MAP_H
+                and grid[ny][nx] != WALL_CHAR
+                and (nx, ny) not in other_pos)
+
+    # --- 追尾モード（仕様 §17）---
+    if random.random() < ENEMY_CHASE_RATE:
+        chase_candidates = [
+            (dx, dy) for dx, dy in dirs
+            if abs((ex + dx) - px) + abs((ey + dy) - py) < cur_dist
+            and (can_enter(ex + dx, ey + dy) or (ex + dx, ey + dy) == (px, py))
+        ]
+        if chase_candidates:
+            random.shuffle(chase_candidates)
+            dx, dy = chase_candidates[0]
+            nx, ny = ex + dx, ey + dy
+            if (nx, ny) == (px, py):
+                return 'combat'
+            enemy['x'], enemy['y'] = nx, ny
+            return 'moved'
+        # 追尾候補なし → ランダムにフォールバック
+
+    # --- ランダム移動（フォールバック / 非追尾モード）---
+    random.shuffle(dirs)
     for dx, dy in dirs:
-        nx, ny = enemy['x'] + dx, enemy['y'] + dy
-
+        nx, ny = ex + dx, ey + dy
         if not (0 <= nx < MAP_W and 0 <= ny < MAP_H):  # マップ外（仕様 §7.2.2）
             continue
         if grid[ny][nx] == WALL_CHAR:                  # 壁（仕様 §7.2.2）
             continue
         if (nx, ny) in other_pos:                       # 他の敵（仕様 §7.2.4）
             continue
-
         if (nx, ny) == (px, py):
-            # プレイヤーマスへ突撃 → 戦闘（位置は変えない: フェーズ1の簡略化）
             return 'combat'
-
-        # 有効マスへ移動
         enemy['x'], enemy['y'] = nx, ny
         return 'moved'
 

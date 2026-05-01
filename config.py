@@ -31,6 +31,8 @@ _DEFAULTS = {
     "BOSS_ATK_MULTIPLIER":  2,    # ボスATK = ENEMY_ATK × 2
     "BOSS_KILL_BONUS":      50,   # ボス撃破スコアボーナス
     "BOSS_SPAWN_OFFSET":    10,   # SURVIVE_TURNS - この値 のターンでボス出現
+    "ENEMY_CHASE_RATE":     0.7,  # 敵がプレイヤー方向へ近づく確率（0.0=完全ランダム, 1.0=常に追尾）
+    "DAMAGE_VARIANCE_RATE": 0.2,  # 通常ダメージの振れ幅（ATK ± この割合: 0.0=固定, 0.2=±20%）
 }
 
 # --- エリアサイズプリセット ---
@@ -103,3 +105,5 @@ BOSS_HP_MULTIPLIER   = _cfg["BOSS_HP_MULTIPLIER"]
 BOSS_ATK_MULTIPLIER  = _cfg["BOSS_ATK_MULTIPLIER"]
 BOSS_KILL_BONUS      = _cfg["BOSS_KILL_BONUS"]
 BOSS_SPAWN_OFFSET    = _cfg["BOSS_SPAWN_OFFSET"]
+ENEMY_CHASE_RATE     = _cfg["ENEMY_CHASE_RATE"]
+DAMAGE_VARIANCE_RATE = _cfg["DAMAGE_VARIANCE_RATE"]
